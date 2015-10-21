@@ -25,3 +25,6 @@ PRODUCT_PACKAGES += \
 PRODUCT_PACKAGES += \
    memtrack.montblanc
 
+# STE Camera Symbols
+PRODUCT_PACKAGES += \
+    libste_symbols

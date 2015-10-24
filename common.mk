@@ -29,4 +29,5 @@ PRODUCT_PACKAGES += \
 PRODUCT_PACKAGES += \
     libcamera_symbols \
     libicuuc_51 \
-    libmd5_symbols
+    libmd5_symbols \
+    libril_symbols

@@ -50,3 +50,16 @@ LOCAL_MODULE := libmd5_symbols
 LOCAL_MODULE_TAGS := optional
 
 include $(BUILD_SHARED_LIBRARY)
+
+#
+# compat symbols for RIL
+#
+
+include $(CLEAR_VARS)
+
+LOCAL_SRC_FILES := ste_ril.cpp
+LOCAL_SHARED_LIBRARIES := libbinder
+LOCAL_MODULE := libril_symbols
+LOCAL_MODULE_TAGS := optional
+
+include $(BUILD_SHARED_LIBRARY)

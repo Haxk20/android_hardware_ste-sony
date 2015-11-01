@@ -16,12 +16,9 @@ LOCAL_PATH := $(call my-dir)
 include $(CLEAR_VARS)
 
 LOCAL_SRC_FILES := \
-    ste_camera.cpp \
-    ste_ril.cpp
+    ste_camera.cpp
 
-LOCAL_SHARED_LIBRARIES := \
-    libbinder \
-    libui
+LOCAL_SHARED_LIBRARIES := libui
 
 LOCAL_MODULE := libste_symbols
 LOCAL_MODULE_TAGS := optional

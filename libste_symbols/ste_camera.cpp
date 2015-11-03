@@ -15,6 +15,8 @@
  */
 
 #include <system/window.h>
+#include <gui/SurfaceComposerClient.h>
+#include <ui/DisplayInfo.h>
 #include <ui/PixelFormat.h>
 #include <ui/Rect.h>
 
@@ -44,6 +46,22 @@ extern "C" {
             buffer_handle_t* handle, uint32_t* stride) {
         return _ZN7android22GraphicBufferAllocator5allocEjjijPPK13native_handlePj(
                 width, height, format, (uint32_t)usage, handle, stride);
+    }
+
+    /* ssize_t SurfaceComposerClient::getDisplayWidth */
+    ssize_t _ZN7android21SurfaceComposerClient15getDisplayWidthEi(int32_t displayId) {
+        DisplayInfo info;
+        SurfaceComposerClient::getDisplayInfo(
+                SurfaceComposerClient::getBuiltInDisplay(displayId), &info);
+        return static_cast<ssize_t>(info.w);
+    }
+
+    /* ssize_t SurfaceComposerClient::getDisplayHeight */
+    ssize_t _ZN7android21SurfaceComposerClient16getDisplayHeightEi(int32_t displayId) {
+        DisplayInfo info;
+        SurfaceComposerClient::getDisplayInfo(
+                SurfaceComposerClient::getBuiltInDisplay(displayId), &info);
+        return static_cast<ssize_t>(info.h);
     }
 
 }

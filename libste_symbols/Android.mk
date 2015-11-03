@@ -18,7 +18,10 @@ include $(CLEAR_VARS)
 LOCAL_SRC_FILES := \
     ste_camera.cpp
 
-LOCAL_SHARED_LIBRARIES := libui
+LOCAL_SHARED_LIBRARIES := \
+    libgui \
+    libui \
+    libutils
 
 LOCAL_MODULE := libste_symbols
 LOCAL_MODULE_TAGS := optional

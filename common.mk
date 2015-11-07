@@ -25,6 +25,7 @@ PRODUCT_PACKAGES += \
 PRODUCT_PACKAGES += \
    memtrack.montblanc
 
-# STE Camera Symbols
+# STE Compat Symbols
 PRODUCT_PACKAGES += \
-    libste_symbols
+    libste_symbols \
+    libicuuc_51

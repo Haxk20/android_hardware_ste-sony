@@ -27,3 +27,16 @@ LOCAL_MODULE := libste_symbols
 LOCAL_MODULE_TAGS := optional
 
 include $(BUILD_SHARED_LIBRARY)
+
+#
+# compat symbols for cn_server
+#
+
+include $(CLEAR_VARS)
+
+LOCAL_SRC_FILES := ucnv_51.c
+LOCAL_SHARED_LIBRARIES := libicuuc
+LOCAL_MODULE := libicuuc_51
+LOCAL_MODULE_TAGS := optional
+
+include $(BUILD_SHARED_LIBRARY)

@@ -38,3 +38,15 @@ LOCAL_MODULE := libicuuc_51
 LOCAL_MODULE_TAGS := optional
 
 include $(BUILD_SHARED_LIBRARY)
+
+#
+# compat symbols for suntrold
+#
+
+include $(CLEAR_VARS)
+
+LOCAL_SRC_FILES := md5/md5.c
+LOCAL_MODULE := libmd5_symbols
+LOCAL_MODULE_TAGS := optional
+
+include $(BUILD_SHARED_LIBRARY)

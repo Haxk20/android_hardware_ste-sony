@@ -4,11 +4,14 @@
  */
 
 #define LOG_TAG "STE-HWComposer"
+#define HWC_REMOVE_DEPRECATED_VERSIONS 1
 
 #include <hardware/hardware.h>
-#include "hwcomposer.h"
+#include <hardware/hwcomposer.h>
+#include <hardware/hwcomposer_defs.h>
 #include <cutils/log.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
@@ -30,25 +33,13 @@
 #include <grp.h>
 #include "vsync_monitor.h"
 
-/* Use the STE version if available, otherwise fall back to
- * the corresponding vanilla version.
- * Note: the STE version is normally only unavailable
- * during the bring-up period of an Android upgrade.
- */
-#ifdef HWC_DEVICE_API_VERSION_0_3_STE
-#define STE_HWC_DEVICE_API_CURRENT HWC_DEVICE_API_VERSION_0_3_STE
-#else
-#define STE_HWC_DEVICE_API_CURRENT HWC_DEVICE_API_VERSION_0_3
-#endif
-
 #define DEBUG_STE_HWCOMPOSER 0
 #define DEBUG_STE_HWCOMPOSER_LAYER_DUMP 0
 #define DEBUG_STE_HWCOMPOSER_ALLOC 0
 
 #define HWMEM_PATH ("/dev/" HWMEM_DEFAULT_DEVICE_NAME)
 #define COMPDEV_PATH "/dev/comp0"
-
-#ifdef ENABLE_HDMI
+#if 0
 #define HDMID_SOCKET_LISTEN_PATH "/dev/socket/hdmid"
 #endif
 
@@ -61,8 +52,19 @@
 /* Max number of layers that can be cached. */
 #define CACHED_LAYERS_SIZE 16
 
+/*
+ * names for setParameter()
+ */
+enum {
+    /* Specifies the UI orientation */
+    HWC_UI_ORIENTATION = 0x00000000,
+    /* Specifies if hardware rotation is used */
+    HWC_HARDWARE_ROTATION = 0x00000001,
+    /* Set the hdmi plug status */
+    HWC_HDMI_PLUGGED = 0x00000002,
+};
 
-#ifdef ENABLE_HDMI
+#if 0
 typedef struct hwc_hdmi_setting {
     bool                 hdmi_plugged;
     bool                 resolutionchanged;
@@ -73,23 +75,20 @@ typedef struct hwc_hdmi_setting {
 
 static int hwcomposer_device_open(const struct hw_module_t *module,
         const char *name, struct hw_device_t **device);
-
-static int hwcomposer_setparameter(struct hwc_composer_device *dev,
+static int hwcomposer_setparameter(struct hwc_composer_device_1 *dev,
                 int param, int value);
-
-static int hwcomposer_eventControl(struct hwc_composer_device* dev,
-                int event, int enabled);
+static int hwcomposer_eventControl(struct hwc_composer_device_1* dev, int event, int dpy, int enabled);
 
 static struct hw_module_methods_t hwcomposer_module_methods = {
     .open = hwcomposer_device_open,
 };
 
-static struct hwc_methods hwcomposer_methods = {
-    .eventControl = hwcomposer_eventControl,
-#ifdef HWC_DEVICE_API_VERSION_0_3_STE
-    .setParameter = hwcomposer_setparameter,
-#endif /* HWC_DEVICE_API_VERSION_0_3_STE */
-};
+
+static int hwcomposer_blank(struct hwc_composer_device_1 *dev,
+        int disp, int blank)
+{
+        return 0;
+}
 
 struct hwc_module HAL_MODULE_INFO_SYM = {
     .common = {
@@ -115,7 +114,7 @@ struct worker_context {
     int hwmem;
     int compdev;
     const struct gralloc_module_t *gralloc;
-    hwc_layer_list_t* work_list;
+    hwc_display_contents_1_t* work_list;
     struct hwc_rect* frame_rect;
     uint32_t compdev_layer_count;
     uint32_t compdev_bypass_count;
@@ -126,7 +125,7 @@ struct worker_context {
 };
 
 struct hwcomposer_context {
-    struct hwc_composer_device dev;
+    struct hwc_composer_device_1 dev;
     pthread_mutex_t hwc_mutex;
     int hwmem;
     int compdev;
@@ -163,7 +162,7 @@ static int worker_init(struct hwcomposer_context *ctx,
                         const struct gralloc_module_t *gralloc);
 static int worker_destroy(struct hwcomposer_context *ctx);
 static int worker_signal_update(struct hwcomposer_context *ctx,
-                                hwc_layer_list_t* work_list,
+                                hwc_display_contents_1_t* work_list,
                                 uint32_t compdev_layer_count,
                                 uint32_t compdev_bypass_count,
                                 struct hwc_rect* frame_rect);
@@ -770,7 +769,7 @@ int init_layer_cache_locked(struct hwcomposer_context *ctx)
     return 0;
 }
 
-void populate_cached_layer_locked(struct hwcomposer_context *ctx, hwc_layer_list_t* list)
+void populate_cached_layer_locked(struct hwcomposer_context *ctx, hwc_display_contents_1_t* list)
 {
     size_t i;
     int32_t compositionType = HWC_FRAMEBUFFER;
@@ -782,7 +781,7 @@ void populate_cached_layer_locked(struct hwcomposer_context *ctx, hwc_layer_list
 
     /* lets poplulate the list and and return false since we need a new reference composition done */
     for (i = 0; i < list->numHwLayers; i++) {
-        struct hwc_layer* layer = &list->hwLayers[i];
+        struct hwc_layer_1* layer = &list->hwLayers[i];
 
         if(layer->compositionType == HWC_OVERLAY)
             compositionType = HWC_OVERLAY;
@@ -800,7 +799,7 @@ void populate_cached_layer_locked(struct hwcomposer_context *ctx, hwc_layer_list
     }
 }
 
-bool check_cached_layers_locked(struct hwcomposer_context *ctx, hwc_layer_list_t* list)
+bool check_cached_layers_locked(struct hwcomposer_context *ctx, hwc_display_contents_1_t* list)
 {
     size_t i;
     int32_t compositionType = HWC_FRAMEBUFFER;
@@ -830,7 +829,7 @@ bool check_cached_layers_locked(struct hwcomposer_context *ctx, hwc_layer_list_t
          * change, but order must be preserved */
         bool is_ok = true;
         for (i = 0; i < list->numHwLayers; i++) {
-            struct hwc_layer* layer = &list->hwLayers[i];
+            struct hwc_layer_1* layer = &list->hwLayers[i];
             if (layer->handle != NULL && !(layer->flags & HWC_SKIP_LAYER)) {
                 ALOGI_IF(DEBUG_STE_HWCOMPOSER, "iteration %d", i);
 
@@ -879,7 +878,7 @@ bool check_cached_layers_locked(struct hwcomposer_context *ctx, hwc_layer_list_t
 }
 
 
-int grab_all_layers_locked(struct hwcomposer_context *ctx, hwc_layer_list_t* list)
+int grab_all_layers_locked(struct hwcomposer_context *ctx, hwc_display_contents_1_t* list)
 {
     size_t i;
 
@@ -903,7 +902,7 @@ int grab_all_layers_locked(struct hwcomposer_context *ctx, hwc_layer_list_t* lis
     }
 
     for (i = 0; i < list->numHwLayers; i++) {
-        struct hwc_layer* layer = &list->hwLayers[i];
+        struct hwc_layer_1* layer = &list->hwLayers[i];
 
         ctx->actual_composition_types[i] = layer->compositionType;
         layer->compositionType = HWC_OVERLAY;
@@ -913,14 +912,14 @@ int grab_all_layers_locked(struct hwcomposer_context *ctx, hwc_layer_list_t* lis
     return 0;
 }
 
-void ungrab_fb_layers_locked(struct hwcomposer_context *ctx, hwc_layer_list_t* list)
+void ungrab_fb_layers_locked(struct hwcomposer_context *ctx, hwc_display_contents_1_t* list)
 {
     size_t i;
 
     ALOGI_IF(DEBUG_STE_HWCOMPOSER, "%s", __func__);
 
     for (i = 0; i < list->numHwLayers; i++) {
-        struct hwc_layer* layer = &list->hwLayers[i];
+        struct hwc_layer_1* layer = &list->hwLayers[i];
             ALOGI_IF(DEBUG_STE_HWCOMPOSER,
             "HWC composition layer restored to composition type %d for handle %d",
             ctx->actual_composition_types[i], (int)layer->handle);
@@ -928,12 +927,18 @@ void ungrab_fb_layers_locked(struct hwcomposer_context *ctx, hwc_layer_list_t* l
     }
 }
 
-static int hwcomposer_prepare(struct hwc_composer_device *dev, hwc_layer_list_t* list)
+static int hwcomposer_prepare(hwc_composer_device_1_t *dev, size_t numDisplays, hwc_display_contents_1_t** displays)
 {
     ALOGI_IF(DEBUG_STE_HWCOMPOSER, "%s", __func__);
     struct hwcomposer_context *ctx = (struct hwcomposer_context *)dev;
     size_t i;
     int ret = 0;
+
+    // Compat
+    hwc_display_contents_1_t* list = NULL;
+    if (numDisplays > 0) {
+        list = displays[0];
+    }      
 
     pthread_mutex_lock(&ctx->hwc_mutex);
     ctx->bypass_ovly = false;
@@ -942,7 +947,7 @@ static int hwcomposer_prepare(struct hwc_composer_device *dev, hwc_layer_list_t*
         bool skip_layer_scene = false;
         /* Check for skip layer in the bottom layer */
         for (i = 0; i < list->numHwLayers; i++) {
-            struct hwc_layer* layer = &list->hwLayers[i];
+            struct hwc_layer_1* layer = &list->hwLayers[i];
             if (layer->flags & HWC_SKIP_LAYER) {
                 skip_layer_scene = true;
                 break;
@@ -953,7 +958,7 @@ static int hwcomposer_prepare(struct hwc_composer_device *dev, hwc_layer_list_t*
             /* Find out if there is a video layer */
             ctx->videoplayback = false;
             for (i = 0; i < list->numHwLayers; i++) {
-                struct hwc_layer* layer = &list->hwLayers[i];
+                struct hwc_layer_1* layer = &list->hwLayers[i];
                 if (layer->handle != NULL &&
                         bufferIsHWMEM(ctx->gralloc, layer->handle) &&
                         bufferIsYUV(ctx->gralloc, layer->handle)) {
@@ -1008,7 +1013,7 @@ static int hwcomposer_prepare(struct hwc_composer_device *dev, hwc_layer_list_t*
              * General: All B2R2 work will be done inside the kernel in compdev.
              */
             for (i = 0; i < list->numHwLayers; i++) {
-                struct hwc_layer* layer = &list->hwLayers[i];
+                struct hwc_layer_1* layer = &list->hwLayers[i];
 
                 /* The initial state should always be HWC_FRAMEBUFFER */
                 layer->compositionType = HWC_FRAMEBUFFER;
@@ -1175,10 +1180,7 @@ exit:
     return ret;
 }
 
-static int hwcomposer_set(struct hwc_composer_device *dev,
-                hwc_display_t dpy,
-                hwc_surface_t sur,
-                hwc_layer_list_t* list)
+static int hwcomposer_set(struct hwc_composer_device_1 *dev, size_t numDisplays, hwc_display_contents_1_t** displays)
 {
     ALOGI_IF(DEBUG_STE_HWCOMPOSER, "%s", __func__);
     struct hwcomposer_context *ctx = (struct hwcomposer_context *)dev;
@@ -1191,6 +1193,11 @@ static int hwcomposer_set(struct hwc_composer_device *dev,
     enum compdev_transform app_transform = COMPDEV_TRANSFORM_ROT_0;
     enum compdev_transform fb_transform;
     enum compdev_transform hw_transform;
+
+    // Only support one display
+    hwc_display_t dpy = displays[0]->dpy;
+    hwc_surface_t sur = displays[0]->sur;
+    hwc_display_contents_1_t* list = displays[0];
 
     /* Clear framerect for calculating visible area */
     memset(&frame_rect, 0, sizeof(frame_rect));
@@ -1221,7 +1228,7 @@ static int hwcomposer_set(struct hwc_composer_device *dev,
 
         /* 1. Figure out how many layers to send to compdev and the combined size */
         for (i = 0; i < list->numHwLayers; i++) {
-            struct hwc_layer* layer = &list->hwLayers[i];
+            struct hwc_layer_1* layer = &list->hwLayers[i];
 
             if (layer->compositionType == HWC_FRAMEBUFFER) {
                 break;
@@ -1312,13 +1319,14 @@ static int hwcomposer_set(struct hwc_composer_device *dev,
     /* 6. This step is handled by libCompose */
 
     pthread_mutex_unlock(&ctx->hwc_mutex);
+
     return 0;
 error:
     pthread_mutex_unlock(&ctx->hwc_mutex);
     return ret;
 }
 
-void hwcomposer_dump(struct hwc_composer_device* dev, char *buff, int buff_len)
+void hwcomposer_dump(struct hwc_composer_device_1* dev, char *buff, int buff_len)
 {
     ALOGI_IF(DEBUG_STE_HWCOMPOSER, "%s", __func__);
     struct hwcomposer_context *ctx = (struct hwcomposer_context *)dev;
@@ -1327,7 +1335,7 @@ void hwcomposer_dump(struct hwc_composer_device* dev, char *buff, int buff_len)
     pthread_mutex_unlock(&ctx->hwc_mutex);
 }
 
-static int hwcomposer_setparameter(struct hwc_composer_device *dev,
+static int hwcomposer_setparameter(struct hwc_composer_device_1 *dev,
                 int param, int value)
 {
     struct hwcomposer_context *ctx = (struct hwcomposer_context *)dev;
@@ -1362,7 +1370,7 @@ static int hwcomposer_setparameter(struct hwc_composer_device *dev,
     return ret;
 }
 
-static void hwcomposer_register_procs(struct hwc_composer_device* dev, hwc_procs_t const* procs)
+static void hwcomposer_register_procs(struct hwc_composer_device_1* dev, hwc_procs_t const* procs)
 {
     struct hwcomposer_context *ctx = (struct hwcomposer_context *)dev;
     ctx->procs = (struct hwc_procs *)procs;
@@ -1370,7 +1378,7 @@ static void hwcomposer_register_procs(struct hwc_composer_device* dev, hwc_procs
     ALOGI_IF(DEBUG_STE_HWCOMPOSER && !procs, "%s: procs deregistered", __func__);
 }
 
-static int hwcomposer_query(struct hwc_composer_device* dev, int what, int* value)
+static int hwcomposer_query(struct hwc_composer_device_1* dev, int what, int* value)
 {
     struct hwcomposer_context *ctx = (struct hwcomposer_context *)dev;
 
@@ -1398,35 +1406,33 @@ static int hwcomposer_query(struct hwc_composer_device* dev, int what, int* valu
     return 0;
 }
 
-static int hwcomposer_eventControl(struct hwc_composer_device* dev, int event, int enabled)
+static int hwcomposer_eventControl(struct hwc_composer_device_1* dev, int event, int dpy, int enabled)
 {
     struct hwcomposer_context *ctx = (struct hwcomposer_context *)dev;
+    int ret = 0;
+
+    if (enabled != 0 && enabled != 1)
+        return -EINVAL;
 
     switch (event) {
-        case HWC_EVENT_VSYNC:
-        {
-            //int val = !!enabled;
-            int err;
+    case HWC_EVENT_VSYNC:
+    {
+        if (enabled) {
+            if (ctx->procs && ctx->procs->vsync) {
+                vsync_monitor_enable(ctx->procs);
+            } else {
+                ALOGW("%s: Enable VSYNC called without a registered callback", __func__);
+            }
+        } else {
+            vsync_monitor_disable();
+        }
+    }
+    break;
+    default:
+        ALOGW("%s: got unknown event id: %d", __func__, event);
+    }
 
-            //if (hwc_dev->use_sw_vsync) {
-            if (1) {
-                if (enabled)
-                    vsync_monitor_enable();
-                    //start_sw_vsync(hwc_dev);
-                else
-                    vsync_monitor_disable();
-                    //stop_sw_vsync();
-                return 0;
-             }
-
-             /* we never reach here */
-             return 0;
-         }
-
-        default:
-            return -EINVAL;
-     }
-
+    return ret;
 }
 
 static enum compdev_transform get_dst_transform(uint32_t hw_rot, enum compdev_transform img_transform)
@@ -1458,7 +1464,7 @@ static void worker_send_compdev_layer(struct worker_context* wctx)
     /* Direct composition */
     ALOGI_IF(DEBUG_STE_HWCOMPOSER, "%s: Direct composition", __func__);
 
-    struct hwc_layer* layer = &wctx->work_list->hwLayers[0];
+    struct hwc_layer_1* layer = &wctx->work_list->hwLayers[0];
 
     if (convert_image(wctx->gralloc, layer->handle, &img))
         ALOGE("%s: Convert image failed", __func__);
@@ -1607,7 +1613,7 @@ static int worker_destroy(struct hwcomposer_context *ctx)
 }
 
 static int worker_signal_update(struct hwcomposer_context *ctx,
-                                hwc_layer_list_t* work_list,
+                                hwc_display_contents_1_t* work_list,
                                 uint32_t compdev_layer_count,
                                 uint32_t compdev_bypass_count,
                                 struct hwc_rect* frame_rect)
@@ -1688,7 +1694,7 @@ static int hwcomposer_device_open(const struct hw_module_t *module,
         pthread_mutex_lock(&ctx->hwc_mutex);
 
         ctx->dev.common.tag = HARDWARE_DEVICE_TAG;
-        ctx->dev.common.version = STE_HWC_DEVICE_API_CURRENT;
+        ctx->dev.common.version = HWC_DEVICE_API_VERSION_1_0;
         ctx->dev.common.module = (struct hw_module_t *)module;
         ctx->dev.common.close = hwcomposer_close;
 
@@ -1697,7 +1703,8 @@ static int hwcomposer_device_open(const struct hw_module_t *module,
         ctx->dev.dump          = hwcomposer_dump;
         ctx->dev.registerProcs = hwcomposer_register_procs;
         ctx->dev.query         = hwcomposer_query;
-        ctx->dev.methods       = &hwcomposer_methods;
+        ctx->dev.blank         = hwcomposer_blank;
+        ctx->dev.eventControl  = hwcomposer_eventControl;
 
         ctx->hwmem = open(HWMEM_PATH, O_RDWR);
         if (ctx->hwmem < 0) {
@@ -1732,15 +1739,7 @@ static int hwcomposer_device_open(const struct hw_module_t *module,
             ALOGE("Error initializing egl worker");
             goto worker_error;
         }
-
-        vsync_monitor_init(ctx);
-
-#ifdef ENABLE_HDMI
-        ctx->hdmi_settings.hdmid_sockfd = open_hdmid_socket();
-        if (ctx->hdmi_settings.hdmid_sockfd < 0)
-            ALOGE("Failed to open communication channel to hdmid");
-#endif
-
+	vsync_monitor_init(ctx);
         *device = &ctx->dev.common;
         pthread_mutex_unlock(&ctx->hwc_mutex);
     } else
@@ -1758,4 +1757,5 @@ error:
     pthread_mutex_unlock(&ctx->hwc_mutex);
     return -1;
 }
+
 

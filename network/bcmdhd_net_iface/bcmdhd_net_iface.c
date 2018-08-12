@@ -11,7 +11,7 @@
 #include <arpa/inet.h>
 
 #include <cutils/log.h>
-#include <netutils/ifc.h>
+#include "../../../../system/core/libnetutils/include/netutils/ifc.h"
 #include <private/android_filesystem_config.h>
 
 #define INTERFACE_MAX_BUFFER_SIZE 4096

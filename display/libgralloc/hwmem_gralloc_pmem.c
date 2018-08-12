@@ -36,9 +36,9 @@
 
 #include "hwmem_gralloc.h"
 
-#if HAVE_ANDROID_OS
+
 #include "../android_pmem.h"
-#endif
+
 
 
 // we need this for now because pmem cannot mmap at an offset

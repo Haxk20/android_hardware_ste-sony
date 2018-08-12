@@ -10,26 +10,8 @@ LOCAL_SRC_FILES := \
    stelp_time.c \
    OMXdebug.cpp \
    OMXdebug_specific.c
-LOCAL_LDLIBS := -llog
-LOCAL_CFLAGS += -DFREQ_SCALING_ALLOWED -DANDROID \
-	-Os \
-       -ffunction-sections \
-       -fdata-sections \
-       -funwind-tables \
-       -fstack-protector-strong \
-       -D_FORTIFY_SOURCE=2 \
-       -fno-short-enums \
-       -no-canonical-prefixes \
-       -fno-canonical-system-headers \
-       -mthumb-interwork \
-       -fgcse-after-reload \
-       -frerun-cse-after-loop \
-       -frename-registers \
-       -fno-builtin-sin \
-       -fno-strict-volatile-bitfields \
-       -fvisibility-inlines-hidden
 
-LOCAL_CLANG := false
+LOCAL_CFLAGS += -DFREQ_SCALING_ALLOWED -DANDROID
 
 LOCAL_MODULE:= libstelpcutils
 LOCAL_MODULE_TAGS := optional

@@ -21,7 +21,7 @@ LOCAL_PATH := $(call my-dir)
 include $(CLEAR_VARS)
 LOCAL_PRELINK_MODULE := false
 LOCAL_MODULE_PATH := $(TARGET_OUT_SHARED_LIBRARIES)/hw
-LOCAL_SHARED_LIBRARIES := liblog libcutils libGLESv1_CM
+LOCAL_SHARED_LIBRARIES := liblog libcutils libnativewindow libGLESv1_CM
 
 LOCAL_SRC_FILES := 	\
 	hwmem_gralloc.c hwmem_gralloc_pmem.c hwmem_gralloc_framebuffer.c

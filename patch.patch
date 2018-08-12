@@ -1,0 +1,97 @@
+From 68f227412168f063350aa44e9146bc40c7785505 Mon Sep 17 00:00:00 2001
+From: Shilin Victor <chrono.monochrome@gmail.com>
+Date: Sat, 28 Jan 2017 22:13:23 +0700
+Subject: [PATCH] libstelpcutils: fix build
+
+Change-Id: Iec136c03e63e30ebbb672dc48c990ff9549e564f
+---
+ media/libstelpcutils/Android.mk | 63 
+++++++++++++++++++++++++++---------------
+ 1 file changed, 40 insertions(+), 23 deletions(-)
+
+diff --git a/media/libstelpcutils/Android.mk 
+b/media/libstelpcutils/Android.mk
+index 7dd13e15..ebd5faf9 100755
+--- a/media/libstelpcutils/Android.mk
++++ b/media/libstelpcutils/Android.mk
+@@ -12,7 +12,24 @@ LOCAL_SRC_FILES := \
+    OMXdebug_specific.c
+ 
+ LOCAL_LDLIBS := -llog
+-LOCAL_CFLAGS += -DFREQ_SCALING_ALLOWED -DANDROID
++LOCAL_CFLAGS += -DFREQ_SCALING_ALLOWED -DANDROID \
++       -Os \
++       -ffunction-sections \
++       -fdata-sections \
++       -funwind-tables \
++       -fstack-protector-strong \
++       -D_FORTIFY_SOURCE=2 \
++       -fno-short-enums \
++       -no-canonical-prefixes \
++       -fno-canonical-system-headers \
++       -mthumb-interwork \
++       -fgcse-after-reload \
++       -frerun-cse-after-loop \
++       -frename-registers \
++       -fno-builtin-sin \
++       -fno-strict-volatile-bitfields \
++       -fvisibility-inlines-hidden
++
+ 
+ LOCAL_CLANG := false
+ 
+@@ -21,31 +38,31 @@ LOCAL_MODULE_TAGS := optional
+ LOCAL_PRELINK_MODULE := false
+ 
+ LOCAL_SHARED_LIBRARIES := \
+-	libutils \
+-	libcutils \
+-	liblog
++       libutils \
++       libcutils \
++       liblog
+ 
+ MULTIMEDIA_PATH := $(LOCAL_PATH)/../../multimedia
+ 
+ LOCAL_C_INCLUDES += \
+-	$(TOP)/hardware/libhardware/include  \
+-	$(TOP)/frameworks/native/include/media/hardware \
+-	$(TOP)/frameworks/native/include \
+-	$(MULTIMEDIA_PATH)/shared/utils/include \
+-	$(MULTIMEDIA_PATH)/shared/omxilosalservices_api \
+-	$(MULTIMEDIA_PATH)/shared/ens_interface/nmf/common \
+-	$(MULTIMEDIA_PATH)/shared/ens_interface/include \
+-	$(MULTIMEDIA_PATH)/shared/ens_interface/omxil \
+-	$(MULTIMEDIA_PATH)/shared/omxil \
+-	$(MULTIMEDIA_PATH)/linux/trace/api \
+-	$(MULTIMEDIA_PATH)/audio/drc/proxy \
+-	$(MULTIMEDIA_PATH)/audio/afm/proxy/include \
+-	$(MULTIMEDIA_PATH)/audio/audio_chipset_apis \
+-	$(MULTIMEDIA_PATH)/audio/speech_proc_vcs/wrapper/inc \
+-	$(MULTIMEDIA_PATH)/video/video_chipset_apis \
+-	$(MULTIMEDIA_PATH)/video/vfm/include \
+-	$(MULTIMEDIA_PATH)/audio/comfortnoise/proxy \
+-	$(MULTIMEDIA_PATH)/shared/ste_shai/include \
+-	$(LOCAL_PATH)/../../
++       $(TOP)/hardware/libhardware/include  \
++       $(TOP)/frameworks/native/include/media/hardware \
++       $(TOP)/frameworks/native/include \
++       $(MULTIMEDIA_PATH)/shared/utils/include \
++       $(MULTIMEDIA_PATH)/shared/omxilosalservices_api \
++       $(MULTIMEDIA_PATH)/shared/ens_interface/nmf/common \
++       $(MULTIMEDIA_PATH)/shared/ens_interface/include \
++       $(MULTIMEDIA_PATH)/shared/ens_interface/omxil \
++       $(MULTIMEDIA_PATH)/shared/omxil \
++       $(MULTIMEDIA_PATH)/linux/trace/api \
++       $(MULTIMEDIA_PATH)/audio/drc/proxy \
++       $(MULTIMEDIA_PATH)/audio/afm/proxy/include \
++       $(MULTIMEDIA_PATH)/audio/audio_chipset_apis \
++       $(MULTIMEDIA_PATH)/audio/speech_proc_vcs/wrapper/inc \
++       $(MULTIMEDIA_PATH)/video/video_chipset_apis \
++       $(MULTIMEDIA_PATH)/video/vfm/include \
++       $(MULTIMEDIA_PATH)/audio/comfortnoise/proxy \
++       $(MULTIMEDIA_PATH)/shared/ste_shai/include \
++       $(LOCAL_PATH)/../../
+ 
+ include $(BUILD_SHARED_LIBRARY)
+

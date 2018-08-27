@@ -90,6 +90,72 @@ static int hwcomposer_blank(struct hwc_composer_device_1 *dev,
         return 0;
 }
 
+static int hwcomposer_getDisplayConfigs(struct hwc_composer_device_1* dev, int disp,
+            uint32_t* configs, size_t* numConfigs) {
+    int ret = 0;
+    struct hwcomposer_context *ctx = (struct hwcomposer_context *)dev;
+    // Currently we allow only 1 config, reported as config id # 0
+    // This config is passed in to getDisplayAttributes. Ignored for now.
+    switch(disp) {
+        case HWC_DISPLAY_PRIMARY:
+            if(*numConfigs > 0) {
+                configs[0] = 0;
+                *numConfigs = 1;
+            }
+            ret = 0; //NO_ERROR
+            break;
+        case HWC_DISPLAY_EXTERNAL:
+        case HWC_DISPLAY_VIRTUAL:
+            ret = -1; //Not connected
+            break;
+    }
+    return ret;
+}
+ static int hwcomposer_getDisplayAttributes(struct hwc_composer_device_1* dev, int disp,
+            uint32_t config, const uint32_t* attributes, int32_t* values) {
+    struct hwcomposer_context *ctx = (struct hwcomposer_context *)dev;
+    //hwc_context_t* ctx = (hwc_context_t*)(dev);
+    // We only have primary display support
+    if (disp != HWC_DISPLAY_PRIMARY) {
+        return -1;
+    }
+     //From HWComposer
+    static const uint32_t DISPLAY_ATTRIBUTES[] = {
+        HWC_DISPLAY_VSYNC_PERIOD,
+        HWC_DISPLAY_WIDTH,
+        HWC_DISPLAY_HEIGHT,
+        HWC_DISPLAY_DPI_X,
+        HWC_DISPLAY_DPI_Y,
+        HWC_DISPLAY_NO_ATTRIBUTE,
+    };
+     const size_t NUM_DISPLAY_ATTRIBUTES = (sizeof(DISPLAY_ATTRIBUTES) /
+            sizeof(DISPLAY_ATTRIBUTES)[0]);
+     for (size_t i = 0; i < NUM_DISPLAY_ATTRIBUTES - 1; i++) {
+        switch (attributes[i]) {
+        case HWC_DISPLAY_VSYNC_PERIOD:
+            values[i] = 1000000000.0 / 60;
+            break;
+        case HWC_DISPLAY_WIDTH:
+            values[i] = 480;
+            break;
+        case HWC_DISPLAY_HEIGHT:
+            values[i] = 800;
+            break;
+        case HWC_DISPLAY_DPI_X:
+            values[i] = (int32_t) (219*1000.0);
+            break;
+        case HWC_DISPLAY_DPI_Y:
+            values[i] = (int32_t) (219*1000.0);
+            break;
+        default:
+            ALOGE("Unknown display attribute %d",
+                    attributes[i]);
+            return -EINVAL;
+        }
+    }
+    return 0;
+}
+
 struct hwc_module HAL_MODULE_INFO_SYM = {
     .common = {
         .tag = HARDWARE_MODULE_TAG,
@@ -959,6 +1025,11 @@ static int hwcomposer_prepare(hwc_composer_device_1_t *dev, size_t numDisplays, 
             ctx->videoplayback = false;
             for (i = 0; i < list->numHwLayers; i++) {
                 struct hwc_layer_1* layer = &list->hwLayers[i];
+                if (layer->compositionType == HWC_FRAMEBUFFER_TARGET) {
+                    ALOGV("\tlayer %u: framebuffer target", i);
+                    continue;
+                }
+
                 if (layer->handle != NULL &&
                         bufferIsHWMEM(ctx->gralloc, layer->handle) &&
                         bufferIsYUV(ctx->gralloc, layer->handle)) {
@@ -1694,7 +1765,7 @@ static int hwcomposer_device_open(const struct hw_module_t *module,
         pthread_mutex_lock(&ctx->hwc_mutex);
 
         ctx->dev.common.tag = HARDWARE_DEVICE_TAG;
-        ctx->dev.common.version = HWC_DEVICE_API_VERSION_1_0;
+        ctx->dev.common.version = HWC_DEVICE_API_VERSION_1_1;
         ctx->dev.common.module = (struct hw_module_t *)module;
         ctx->dev.common.close = hwcomposer_close;
 
@@ -1705,6 +1776,8 @@ static int hwcomposer_device_open(const struct hw_module_t *module,
         ctx->dev.query         = hwcomposer_query;
         ctx->dev.blank         = hwcomposer_blank;
         ctx->dev.eventControl  = hwcomposer_eventControl;
+        ctx->dev.getDisplayConfigs = hwcomposer_getDisplayConfigs;
+        ctx->dev.getDisplayAttributes = hwcomposer_getDisplayAttributes;
 
         ctx->hwmem = open(HWMEM_PATH, O_RDWR);
         if (ctx->hwmem < 0) {

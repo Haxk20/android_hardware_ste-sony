@@ -1150,6 +1150,7 @@ static int prepare_hwmem(struct hwcomposer_context* ctx, hwc_display_contents_1_
         /* Check for skip layer in the bottom layer */
         for (i = 0; i < contents->numHwLayers; i++) {
             hwc_layer_1_t &layer = contents->hwLayers[i];
+
             if (layer.flags & HWC_SKIP_LAYER) {
                 skip_layer_scene = true;
                 break;
@@ -1161,6 +1162,12 @@ static int prepare_hwmem(struct hwcomposer_context* ctx, hwc_display_contents_1_
             ctx->videoplayback = false;
             for (i = 0; i < contents->numHwLayers; i++) {
                 hwc_layer_1_t &layer = contents->hwLayers[i];
+
+                if (layer.compositionType == HWC_FRAMEBUFFER_TARGET) {
+                    ALOGV("\tlayer %u: framebuffer target", i);
+                    continue;
+                }
+
                 if (layer.handle != NULL &&
                         bufferIsHWMEM(ctx->gralloc, layer.handle) &&
                         bufferIsYUV(ctx->gralloc, layer.handle)) {
@@ -1406,7 +1413,9 @@ static int hwc_prepare(hwc_composer_device_1_t *dev, size_t numDisplays, hwc_dis
     return 0;
 }
 
-static int set_hwmem(struct hwcomposer_context* ctx, hwc_display_contents_1_t *contents)
+//    hwc_display_t dpy = displays[0]->dpy;
+//    hwc_surface_t sur = displays[0]->sur;
+static int set_hwmem(struct hwcomposer_context* ctx, hwc_display_t dpy, hwc_surface_t sur, hwc_display_contents_1_t *contents)
 {
     ALOGI_IF(DEBUG_STE_HWCOMPOSER, "%s", __func__);
     //struct hwcomposer_context *ctx = (struct hwcomposer_context *)dev;
@@ -1527,8 +1536,8 @@ static int set_hwmem(struct hwcomposer_context* ctx, hwc_display_contents_1_t *c
 
             /* Swap buffers */
             ALOGI_IF(DEBUG_STE_HWCOMPOSER, "%s: Calling eglSwapBuffers", __func__);
-            //if (dpy && sur)
-            //    eglSwapBuffers(dpy, sur);
+            if (dpy && sur)
+                eglSwapBuffers(dpy, sur);
         }
     } else {
         ALOGI_IF(DEBUG_STE_HWCOMPOSER, "%s: All layers are grabbed, skipping GPU job for optimal power performance", __func__);
@@ -1554,10 +1563,13 @@ static int hwc_set(hwc_composer_device_1_t *dev,
 
     struct hwcomposer_context* ctx = (struct hwcomposer_context*)dev;
     hwc_display_contents_1_t *hwmem_contents = displays[HWC_DISPLAY_PRIMARY];
+
+    hwc_display_t dpy = hwmem_contents->dpy;
+    hwc_surface_t sur = hwmem_contents->sur;
     int hwmem_err = 0;
 
     if (hwmem_contents)
-        hwmem_err = set_hwmem(ctx, hwmem_contents);
+        hwmem_err = set_hwmem(ctx, dpy, sur, hwmem_contents);
 
     if (hwmem_err)
         return hwmem_err;

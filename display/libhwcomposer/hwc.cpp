@@ -1565,97 +1565,225 @@ static int hwc_set(hwc_composer_device_1_t *dev,
     return 0;
 }
 
-static int hwc_setPowerMode(struct hwc_composer_device_1 *dev, int disp,
-		int mode)
-{
-	ALOGI("%s: %d -> %d", __func__, disp, mode);
-	return 0;
-}
-
-static int hwc_query(struct hwc_composer_device_1 *dev, int what, int *value)
-{
-	switch (what) {
-		case HWC_VSYNC_PERIOD:
-			return -EINVAL;
-		case HWC_BACKGROUND_LAYER_SUPPORTED:
-			*value = 0;
-			break;
-		case HWC_DISPLAY_TYPES_SUPPORTED:
-			*value = HWC_DISPLAY_PRIMARY_BIT;
-			break;
-		default:
-			return -EINVAL;
-	}
-	return 0;
-}
-
-static void hwc_registerProcs(struct hwc_composer_device_1 *dev,
-		hwc_procs_t const *procs)
-{
-	struct hwcomposer_context *ctx = (struct hwcomposer_context *)dev;
-	ctx->procs = procs;
-}
-
-static int hwc_eventControl(struct hwc_composer_device_1 *dev,
-		int disp, int event, int enabled)
-{
-	return 0;
-}
-
-static int hwc_getDisplayConfigs(struct hwc_composer_device_1 *dev,
-		int disp, uint32_t *configs, size_t *numConfigs)
-{
-	if (*numConfigs < 1)
-		return 0;
-
-	if (disp == HWC_DISPLAY_PRIMARY) {
-		configs[0] = 0;
-		*numConfigs = 1;
-		return 0;
-	}
-
-	return -EINVAL;
-}
-
-static int hwc_getDisplayAttributes(struct hwc_composer_device_1 *dev,
-		int disp, uint32_t config, const uint32_t *attributes, int32_t *values)
-{
-	struct hwcomposer_context *ctx = (struct hwcomposer_context *)dev;
-	int i = 0;
-	if (disp != 0)
-		return -EINVAL;
-
-	while (attributes[i] != HWC_DISPLAY_NO_ATTRIBUTE) {
-		switch (attributes[i]) {
-		case HWC_DISPLAY_VSYNC_PERIOD:
-			values[i] = ctx->vsync_period;
-			break;
-		case HWC_DISPLAY_WIDTH:
-			values[i] = ctx->xres;
-			break;
-		case HWC_DISPLAY_HEIGHT:
-			values[i] = ctx->yres;
-			break;
-		case HWC_DISPLAY_DPI_X:
-			values[i] = ctx->xdpi;
-			break;
-		case HWC_DISPLAY_DPI_Y:
-			values[i] = ctx->ydpi;
-			break;
-		default:
-			return -EINVAL;
-		}
-		i++;
-	}
-	return 0;
-}
-
 static int hwc_device_close(struct hw_device_t *dev)
 {
-	struct hwcomposer_context *hwc = (struct hwcomposer_context *)dev;
-	free(hwc);
-	return 0;
+     struct hwcomposer_context* ctx = ( struct hwcomposer_context*)dev;
+
+    ALOGI_IF(DEBUG_STE_HWCOMPOSER, "%s", __func__);
+
+    if (ctx) {
+        pthread_mutex_lock(&ctx->hwc_mutex);
+        if (worker_destroy(ctx))
+            ALOGE("Error destroying egl worker");
+
+        //vsync_monitor_destroy();
+
+        close(ctx->compdev);
+        close(ctx->hwmem);
+#ifdef ENABLE_HDMI
+        close(ctx->hdmi_settings.hdmid_sockfd);
+#endif
+
+        if (ctx->cached_layers != NULL)
+            free(ctx->cached_layers);
+
+        if (ctx->actual_composition_types != NULL)
+            free(ctx->actual_composition_types);
+        /*
+         * TODO: Use reference counting and cleanup the ctx only
+         * when there are no more clients
+         */
+        pthread_mutex_destroy(&ctx->hwc_mutex);
+        free(ctx);
+    }
+    return 0;
 }
+
+static int hwc_eventControl(struct hwc_composer_device_1* dev, __unused int dpy,
+        int event, int enabled)
+{
+/*    int val = 0, rc = 0;
+     struct hwcomposer_context* ctx = ( struct hwcomposer_context*)dev;
+
+    switch (event) {
+    case HWC_EVENT_VSYNC:
+        val = enabled;
+        ALOGV("%s: HWC_EVENT_VSYNC, enabled=%d", __FUNCTION__, val);
+
+        rc = ioctl(ctx->fb0_fd, S3CFB_SET_VSYNC_INT, &val);
+        if (rc < 0) {
+            ALOGE("%s: could not set vsync using ioctl: %s", __FUNCTION__,
+                strerror(errno));
+            return -errno;
+        }
+        return rc;
+    }*/
+	ALOGE("hwc_eventControl: not implemented!");
+    return 0;
+}
+
+static int hwc_setPowerMode(struct hwc_composer_device_1 *dev, int dpy, int mode)
+{
+ /*    struct hwcomposer_context* ctx = ( struct hwcomposer_context*)dev;
+    int fence = 0;
+    int blank;
+
+    ALOGV("%s mode=%d", __FUNCTION__, mode);
+
+    fence = window_clear(ctx);
+    if (fence != -1)
+        close(fence);
+
+
+    switch (mode) {
+        case HWC_POWER_MODE_OFF:
+            blank = FB_BLANK_POWERDOWN;
+            break;
+        case HWC_POWER_MODE_NORMAL:
+            blank = FB_BLANK_UNBLANK;
+            break;
+        default:
+            // FIXME DOZE and DOZE_SUSPEND are unsupported by the fb driver
+            return -EINVAL;
+    }
+
+    if (ioctl(ctx->fb0_fd, FBIOBLANK, blank) < 0) {
+        ALOGE("%s Error %s in FBIOBLANK blank=%d", __FUNCTION__, strerror(errno), blank);
+    }
+*/
+	ALOGE("hwc_setPowerMode: not implemented!");
+    return 0;
+}
+
+static int hwc_getActiveConfig(struct hwc_composer_device_1 *dev, int disp)
+{
+    // we only support the primary display
+    return 0;
+}
+
+static int hwc_setActiveConfig(struct hwc_composer_device_1 *dev, int dpy, int idx)
+{
+    // Only 1 config supported for the primary display
+    return (idx == 0) ? idx : -EINVAL;
+}
+
+static int hwc_query(struct hwc_composer_device_1* dev,
+        int what, int* value)
+{
+     struct hwcomposer_context* ctx = ( struct hwcomposer_context*)dev;
+
+    ALOGI_IF(DEBUG_STE_HWCOMPOSER, "%s: what=%d", __func__, what);
+    switch (what) {
+    case HWC_BACKGROUND_LAYER_SUPPORTED:
+    {
+        /* we don't support the background layer yet since this is
+         * currently not used in JB.
+         */
+        value[0] = 0;
+    }
+    break;
+    case HWC_VSYNC_PERIOD:
+    {
+        /* FIXME: implement. Does not seem to be used in JB though. */
+        ALOGW("query for VSYNC period called but not implemented!");
+        value[0] = 0;
+    }
+    break;
+    default:
+        // unsupported query
+        return -EINVAL;
+    }
+    return 0;
+}
+
+static void hwc_registerProcs(struct hwc_composer_device_1* dev,
+        hwc_procs_t const* procs)
+{
+     struct hwcomposer_context* ctx = ( struct hwcomposer_context*)dev;
+    ctx->procs = const_cast<hwc_procs_t *>(procs);
+	ALOGI_IF(DEBUG_STE_HWCOMPOSER && procs, "%s: New set of procs registered.", __func__);
+    ALOGI_IF(DEBUG_STE_HWCOMPOSER && !procs, "%s: procs deregistered", __func__);
+}
+
+static int hwc_getDisplayConfigs(struct hwc_composer_device_1* dev, int disp,
+    uint32_t* configs, size_t* numConfigs)
+{
+    ALOGV("%s", __FUNCTION__);
+
+    if (*numConfigs == 0)
+        return 0;
+
+    if (disp == HWC_DISPLAY_PRIMARY) {
+        configs[0] = 0;
+        *numConfigs = 1;
+        return 0;
+    }
+
+    return -EINVAL;
+}
+
+static int hwc_getDisplayAttributes(struct hwc_composer_device_1* dev, int disp,
+    __unused uint32_t config, const uint32_t* attributes, int32_t* values)
+{
+     struct hwcomposer_context* ctx = ( struct hwcomposer_context*)dev;
+    int i = 0;
+
+    ALOGV("%s", __FUNCTION__);
+
+    while(attributes[i] != HWC_DISPLAY_NO_ATTRIBUTE) {
+        switch(disp) {
+        case 0:
+
+            switch(attributes[i]) {
+            case HWC_DISPLAY_VSYNC_PERIOD: /* The vsync period in nanoseconds */
+                values[i] = ctx->vsync_period;
+                break;
+
+            case HWC_DISPLAY_WIDTH: /* The number of pixels in the horizontal and vertical directions. */
+                values[i] = ctx->xres;
+                break;
+
+            case HWC_DISPLAY_HEIGHT:
+                values[i] = ctx->yres;
+                break;
+
+            case HWC_DISPLAY_DPI_X:
+                values[i] = ctx->xdpi;
+                break;
+
+            case HWC_DISPLAY_DPI_Y:
+                values[i] = ctx->ydpi;
+                break;
+
+            default:
+                ALOGE("%s:unknown display attribute %d", __FUNCTION__, attributes[i]);
+                return -EINVAL;
+            }
+            break;
+
+        case 1:
+            // TODO: no hdmi at the moment
+            break;
+
+        default:
+            ALOGE("%s:unknown display %d", __FUNCTION__, disp);
+            return -EINVAL;
+        }
+
+        i++;
+    }
+    return 0;
+}
+
+static void hwc_dump(struct hwc_composer_device_1* dev, char *buff, int buff_len)
+{
+	ALOGI_IF(DEBUG_STE_HWCOMPOSER, "%s", __func__);
+    struct hwcomposer_context* ctx = (struct hwcomposer_context*)dev;
+    pthread_mutex_lock(&ctx->hwc_mutex);
+    /* Nothing to do yet */
+    pthread_mutex_unlock(&ctx->hwc_mutex); 
+}
+
 
 static int hwc_open(const struct hw_module_t *module, const char *name,
 		struct hw_device_t **device)

@@ -21,13 +21,16 @@ LOCAL_PATH := $(call my-dir)
 include $(CLEAR_VARS)
 LOCAL_PRELINK_MODULE := false
 LOCAL_MODULE_PATH := $(TARGET_OUT_SHARED_LIBRARIES)/hw
-LOCAL_SHARED_LIBRARIES := liblog libcutils libnativewindow libGLESv1_CM
+LOCAL_SHARED_LIBRARIES := liblog libcutils libGLESv1_CM libnativewindow libsync
 
 LOCAL_SRC_FILES := 	\
 	hwmem_gralloc.c hwmem_gralloc_pmem.c hwmem_gralloc_framebuffer.c
 
+LOCAL_STATIC_LIBRARIES        := libgralloc1-adapter-exynos4
+
 LOCAL_C_INCLUDES += $(MULTIMEDIA_PATH)/linux/b2r2lib/include $(MULTIMEDIA_PATH)
 LOCAL_MODULE := gralloc.$(TARGET_BOARD_PLATFORM)
 LOCAL_MODULE_TAGS := optional
-LOCAL_CFLAGS:= -DLOG_TAG=\"gralloc\"
+LOCAL_CFLAGS := -DLOG_TAG=\"gralloc\"
+LOCAL_CFLAGS += -DADVERTISE_GRALLOC1
 include $(BUILD_SHARED_LIBRARY)

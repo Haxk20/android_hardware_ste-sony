@@ -917,6 +917,214 @@ void ungrab_fb_layers_locked(struct hwcomposer_context *ctx, hwc_display_content
     }
 }
 
+static enum compdev_transform get_dst_transform(uint32_t hw_rot, enum compdev_transform img_transform)
+{
+    uint32_t img_rot = to_degrees(img_transform);
+    enum compdev_transform transform = remove_rot(img_transform);
+
+    return (compdev_transform)((uint32_t)to_compdev_rotation((360 + img_rot - hw_rot) % 360) | (uint32_t)transform);
+}
+
+static void worker_send_compdev_layer(struct worker_context* wctx)
+{
+    ALOGI_IF(DEBUG_STE_HWCOMPOSER, "%s", __func__);
+    struct comp_img* dest_img = NULL;
+    int ret = 0;
+    uint32_t i = 0;
+    struct compdev_img img;
+    uint32_t usage = 0;
+    enum compdev_transform rect_transform;
+    double x_scale;
+    double y_scale;
+    hwc_rect_t localSourceCrop;
+
+    ALOGI_IF(DEBUG_STE_HWCOMPOSER, "%s: Frame.left=%d, Frame.top=%d, Frame.right=%d, "
+            "Frame.bottom=%d", __func__, wctx->frame_rect->left,
+            wctx->frame_rect->top, wctx->frame_rect->right,
+            wctx->frame_rect->bottom);
+
+    /* Direct composition */
+    ALOGI_IF(DEBUG_STE_HWCOMPOSER, "%s: Direct composition", __func__);
+
+    struct hwc_layer_1* layer = &wctx->work_list->hwLayers[0];
+
+    if (convert_image(wctx->gralloc, layer->handle, &img))
+        ALOGE("%s: Convert image failed", __func__);
+
+    switch (layer->transform) {
+        case HAL_TRANSFORM_ROT_90:
+        case HAL_TRANSFORM_ROT_270:
+        {
+            x_scale = (double)(layer->sourceCrop.right - layer->sourceCrop.left)
+                              / (double)(layer->displayFrame.bottom -
+                                         layer->displayFrame.top);
+            y_scale = (double)(layer->sourceCrop.bottom - layer->sourceCrop.top)
+                              / (double)(layer->displayFrame.right -
+                                         layer->displayFrame.left);
+        }
+        break;
+        default:
+        {
+            x_scale = (double)(layer->sourceCrop.right - layer->sourceCrop.left)
+                              / (double)(layer->displayFrame.right -
+                                         layer->displayFrame.left);
+            y_scale = (double)(layer->sourceCrop.bottom - layer->sourceCrop.top)
+                              / (double)(layer->displayFrame.bottom -
+                                         layer->displayFrame.top);
+        }
+    }
+
+    localSourceCrop = layer->sourceCrop;
+    if (layer->displayFrame.left < layer->visibleRegionScreen.rects[0].left)
+        localSourceCrop.left = layer->sourceCrop.left +
+            ((layer->visibleRegionScreen.rects[0].left -
+              layer->displayFrame.left) * x_scale + 0.5);
+    if (layer->displayFrame.top < layer->visibleRegionScreen.rects[0].top)
+        localSourceCrop.top = layer->sourceCrop.top +
+            ((layer->visibleRegionScreen.rects[0].top -
+              layer->displayFrame.top) * y_scale + 0.5);
+    if (layer->displayFrame.right > layer->visibleRegionScreen.rects[0].right)
+        localSourceCrop.right = layer->sourceCrop.right -
+            ((layer->displayFrame.right -
+              layer->visibleRegionScreen.rects[0].right) * x_scale + 0.5);
+    if (layer->displayFrame.bottom > layer->visibleRegionScreen.rects[0].bottom)
+        localSourceCrop.bottom = layer->sourceCrop.bottom -
+            ((layer->displayFrame.bottom -
+              layer->visibleRegionScreen.rects[0].bottom) * y_scale + 0.5);
+
+    img.src_rect.x = localSourceCrop.left;
+    img.src_rect.y = localSourceCrop.top;
+    img.src_rect.width = localSourceCrop.right - localSourceCrop.left;
+    img.src_rect.height = localSourceCrop.bottom - localSourceCrop.top;
+
+    img.transform = to_compdev_transform(layer->transform);
+
+    rect_transform = get_dst_transform(wctx->hardware_rotation, img.transform);
+    ALOGI_IF(DEBUG_STE_HWCOMPOSER, "%s: rect_transform %d", __func__, rect_transform);
+
+    hwc_get_dst_rect(wctx->frame_rect, rect_transform,
+            wctx->disp_width, wctx->disp_height, &img.dst_rect);
+
+    /* This layer should always be below the framebuffer */
+    img.z_position = 2;
+    img.flags = (uint32_t)COMPDEV_OVERLAY_FLAG;
+
+    /* Set correct flags */
+    if (wctx->compdev_bypass_count > 0)
+        img.flags |= COMPDEV_BYPASS_FLAG;
+
+    usage = wctx->gralloc->perform(wctx->gralloc,
+            GRALLOC_MODULE_PERFORM_GET_BUF_USAGE, layer->handle);
+
+    if (usage & GRALLOC_USAGE_EXTERNAL_DISP)
+        img.flags |= COMPDEV_EXTERNAL_DISP_FLAG;
+
+    if (usage & GRALLOC_USAGE_PROTECTED)
+        img.flags |= COMPDEV_PROTECTED_FLAG;
+
+    ret = ioctl(wctx->compdev, COMPDEV_POST_BUFFER_IOC,
+            (struct compdev_img*)&img);
+    if (ret < 0)
+        ALOGE("%s: Failed to post buffers to compdev, %s", __func__,
+                strerror(errno));
+
+}
+
+
+/* The worker thread function */
+static void* worker(void* context)
+{
+    struct worker_context* wctx = (struct worker_context*)context;
+    pthread_mutex_lock(&wctx->mutex);
+    ALOGI_IF(DEBUG_STE_HWCOMPOSER, "%s: Worker started", __func__);
+    while (wctx->alive) {
+       pthread_cond_wait(&wctx->signal_update, &wctx->mutex);
+       if (wctx->alive) {
+           ALOGI_IF(DEBUG_STE_HWCOMPOSER, "%s: Worker processing layers", __func__);
+           worker_send_compdev_layer(wctx);
+           wctx->working = false;
+           pthread_cond_signal(&wctx->signal_done);
+       }
+    }
+    pthread_mutex_unlock(&wctx->mutex);
+    pthread_exit(NULL);
+    return 0;
+}
+
+static int worker_init(struct hwcomposer_context *ctx,
+                        int hwmem, int compdev,
+                        const struct gralloc_module_t *gralloc)
+{
+    ALOGI_IF(DEBUG_STE_HWCOMPOSER, "%s", __func__);
+    int ret = 0;
+    pthread_mutex_init(&ctx->worker_ctx.mutex, NULL);
+    pthread_mutex_lock(&ctx->worker_ctx.mutex);
+
+    pthread_attr_init(&ctx->worker_ctx.thread_attr);
+    pthread_attr_setdetachstate(&ctx->worker_ctx.thread_attr, PTHREAD_CREATE_JOINABLE);
+    pthread_create(&ctx->worker_ctx.worker_thread, &ctx->worker_ctx.thread_attr, worker, (void*)&ctx->worker_ctx);
+    pthread_cond_init(&ctx->worker_ctx.signal_update, NULL);
+    pthread_cond_init(&ctx->worker_ctx.signal_done, NULL);
+    ctx->worker_ctx.alive = true;
+    ctx->worker_ctx.hwmem = hwmem;
+    ctx->worker_ctx.compdev = compdev;
+    ctx->worker_ctx.gralloc = gralloc;
+    ctx->worker_ctx.disp_width = ctx->disp_width;
+    ctx->worker_ctx.disp_height = ctx->disp_height;
+    pthread_mutex_unlock(&ctx->worker_ctx.mutex);
+    return ret;
+}
+
+static int worker_destroy(struct hwcomposer_context *ctx)
+{
+    int i;
+    ALOGI_IF(DEBUG_STE_HWCOMPOSER, "%s", __func__);
+    pthread_mutex_lock(&ctx->worker_ctx.mutex);
+    /* Kill the thread */
+    ctx->worker_ctx.alive = false;
+    ctx->worker_ctx.working = false;
+    pthread_cond_signal(&ctx->worker_ctx.signal_update);
+    pthread_mutex_unlock(&ctx->worker_ctx.mutex);
+    pthread_join(ctx->worker_ctx.worker_thread, NULL);
+    pthread_mutex_lock(&ctx->worker_ctx.mutex);
+    pthread_cond_destroy(&ctx->worker_ctx.signal_update);
+    pthread_cond_destroy(&ctx->worker_ctx.signal_done);
+    pthread_attr_destroy(&ctx->worker_ctx.thread_attr);
+    pthread_mutex_unlock(&ctx->worker_ctx.mutex);
+    return 0;
+}
+
+static int worker_signal_update(struct hwcomposer_context *ctx,
+                                hwc_display_contents_1_t* work_list,
+                                uint32_t compdev_layer_count,
+                                uint32_t compdev_bypass_count,
+                                struct hwc_rect* frame_rect)
+{
+    ALOGI_IF(DEBUG_STE_HWCOMPOSER, "%s", __func__);
+    pthread_mutex_lock(&ctx->worker_ctx.mutex);
+    ctx->worker_ctx.work_list = work_list;
+    ctx->worker_ctx.compdev_layer_count = compdev_layer_count;
+    ctx->worker_ctx.compdev_bypass_count = compdev_bypass_count;
+    ctx->worker_ctx.frame_rect = frame_rect;
+    ctx->worker_ctx.working = true;
+    ctx->worker_ctx.ui_orientation = ctx->ui_orientation;
+    ctx->worker_ctx.hardware_rotation = ctx->hardware_rotation;
+    pthread_cond_signal(&ctx->worker_ctx.signal_update);
+    pthread_mutex_unlock(&ctx->worker_ctx.mutex);
+    return 0;
+}
+
+static int worker_wait_for_done(struct hwcomposer_context *ctx)
+{
+    ALOGI_IF(DEBUG_STE_HWCOMPOSER, "%s", __func__);
+    pthread_mutex_lock(&ctx->worker_ctx.mutex);
+    /* NOTE: This check is a slight overkill since the mutex is proof enough */
+    if (ctx->worker_ctx.working)
+        pthread_cond_wait(&ctx->worker_ctx.signal_done, &ctx->worker_ctx.mutex);
+    pthread_mutex_unlock(&ctx->worker_ctx.mutex);
+    return 0;
+}
+
 static int prepare_hwmem(struct hwcomposer_context* ctx, hwc_display_contents_1_t* contents)
 {
     /*ctx->force_fb = ctx->force_gpu;
@@ -1198,12 +1406,163 @@ static int hwc_prepare(hwc_composer_device_1_t *dev, size_t numDisplays, hwc_dis
     return 0;
 }
 
-static int hwc_set(struct hwc_composer_device_1 *dev,
-		size_t numDisplays, hwc_display_contents_1_t **displays)
+static int set_hwmem(struct hwcomposer_context* ctx, hwc_display_contents_1_t *contents)
 {
+    ALOGI_IF(DEBUG_STE_HWCOMPOSER, "%s", __func__);
+    //struct hwcomposer_context *ctx = (struct hwcomposer_context *)dev;
+    int ret;
+    uint32_t i;
+    struct hwc_rect frame_rect;
+    int compdevLayerCount = 0;
+    int compdevBypassCount = 0;
+    int layerCount = 0;
+    enum compdev_transform app_transform = COMPDEV_TRANSFORM_ROT_0;
+    enum compdev_transform fb_transform;
+    enum compdev_transform hw_transform;
 
-	ALOGI("I should hwc_set but i'm not");
-	return 0;
+    /* Clear framerect for calculating visible area */
+    memset(&frame_rect, 0, sizeof(frame_rect));
+    frame_rect.top = frame_rect.left = INT_MAX;
+
+    if (NULL != contents) {
+        pthread_mutex_lock(&ctx->hwc_mutex);
+
+    /* Since prepare screwed up the compositiontype it is time for restoring it as well for
+     * the wellbeeing of the rest. TODO Fix a better solution */
+    if (ctx->grabbed_all_layers)
+        ungrab_fb_layers_locked(ctx, contents);
+
+#if DEBUG_STE_HWCOMPOSER
+        ctx->frames++;
+        for (i = 0; i < contents->numHwLayers; i++) {
+            if (contents->hwLayers[i].compositionType == HWC_OVERLAY)
+                ctx->overlay_layers++;
+            else
+                ctx->framebuffer_layers++;
+        }
+        ALOGI_IF(DEBUG_STE_HWCOMPOSER, "Frame count=%d, HWC layers=%d, GL layers=%d, numHwLayers = %d",
+                ctx->frames, ctx->overlay_layers, ctx->framebuffer_layers, contents->numHwLayers);
+#endif
+
+        fb_transform = (compdev_transform)to_compdev_rotation(ctx->ui_orientation);
+        hw_transform = (compdev_transform)to_compdev_rotation(ctx->hardware_rotation);
+
+        /* 1. Figure out how many layers to send to compdev and the combined size */
+        for (i = 0; i < contents->numHwLayers; i++) {
+            hwc_layer_1_t &layer = contents->hwLayers[i];
+
+            if (layer.compositionType == HWC_FRAMEBUFFER) {
+                break;
+            }
+
+            if (layer.visibleRegionScreen.numRects > 0 &&
+                    layer.visibleRegionScreen.rects != NULL) {
+                uint32_t rect_index;
+                compdevLayerCount++;
+                for (rect_index = 0; rect_index<layer.visibleRegionScreen.numRects; rect_index++) {
+                    hwc_rect_t rectRot;
+                    hwc_rect_t* rect = (hwc_rect_t*)&layer.visibleRegionScreen.rects[rect_index];
+                    hwc_rotate(rect, layer.transform, to_degrees(fb_transform),
+                            to_degrees(hw_transform), ctx->disp_width, ctx->disp_height, &rectRot);
+                    frame_rect.top = min(rectRot.top, frame_rect.top);
+                    frame_rect.left = min(rectRot.left, frame_rect.left);
+                    frame_rect.right = max(rectRot.right, frame_rect.right);
+                    frame_rect.bottom = max(rectRot.bottom, frame_rect.bottom);
+                }
+            }
+        }
+        layerCount = contents->numHwLayers;
+
+        /* 2. Post the scene to compdev */
+        if (compdevLayerCount > 0 && layerCount != compdevLayerCount) {
+            if (ctx->grabbed_all_layers) {
+                ALOGI_IF(DEBUG_STE_HWCOMPOSER, "Forced1layer: fb_transform: %d, app_transform: %d, hw_transform %d",
+                        fb_transform, app_transform, hw_transform);
+                hwc_post_compdev_scene(ctx->compdev, fb_transform, app_transform, 1, 1, hw_transform);
+            }
+            else {
+                ALOGI_IF(DEBUG_STE_HWCOMPOSER, "2layer: fb_transform: %d, app_transform: %d, hw_transform %d",
+                        fb_transform, app_transform, hw_transform);
+                hwc_post_compdev_scene(ctx->compdev, fb_transform, app_transform, 2, 0, hw_transform);
+            }
+        } else {
+            /*
+             * For normal use cases, show portrait application
+             * standing up on the clone
+             */
+            if (((to_degrees(fb_transform) + to_degrees(hw_transform)) % 360) == 0)
+                app_transform = COMPDEV_TRANSFORM_ROT_90_CW;
+
+            ALOGI_IF(DEBUG_STE_HWCOMPOSER, "1layer: fb_transform: %d, app_transform: %d, hw_transform %d",
+                    fb_transform, app_transform, hw_transform);
+            hwc_post_compdev_scene(ctx->compdev, fb_transform, app_transform, 1, 0, hw_transform);
+        }
+    }
+
+    /* Handle potential overlay bypass */
+    if (ctx->bypass_ovly) {
+        /* Check if compdev has any listeners. */
+        if (compdevHasListener(ctx->compdev))
+            compdevBypassCount++;
+
+    }
+
+    /* 3. Send layer/layers to compdev in a separate thread */
+    if (compdevLayerCount > 0 || compdevBypassCount > 0) {
+        ALOGI_IF(DEBUG_STE_HWCOMPOSER, "%s: Frame.left=%d, Frame.top=%d, Frame.right=%d, "
+                "Frame.bottom=%d", __func__, frame_rect.left, frame_rect.top,
+                frame_rect.right, frame_rect.bottom);
+        if (worker_signal_update(ctx, contents, compdevLayerCount,
+                compdevBypassCount, &frame_rect))
+            ALOGE("%s: Error signaling update to the worker", __func__);
+    }
+
+    /* If all layers are grabbed....do not call for a GPU job, buffer already composited */
+    if (!ctx->grabbed_all_layers) {
+        /* 4. Start the GPU */
+        if (layerCount != compdevLayerCount || NULL == contents) {
+            /* Composition complete */
+            ALOGI_IF(DEBUG_STE_HWCOMPOSER, "%s: Calling compositionComplete", __func__);
+            ctx->gralloc->perform(ctx->gralloc, GRALLOC_MODULE_PERFORM_COMPOSITION_COMPLETE, NULL);
+
+            /* Swap buffers */
+            ALOGI_IF(DEBUG_STE_HWCOMPOSER, "%s: Calling eglSwapBuffers", __func__);
+            //if (dpy && sur)
+            //    eglSwapBuffers(dpy, sur);
+        }
+    } else {
+        ALOGI_IF(DEBUG_STE_HWCOMPOSER, "%s: All layers are grabbed, skipping GPU job for optimal power performance", __func__);
+    }
+
+    /* 5. Wait for the the Blit jobs to finish */
+    worker_wait_for_done(ctx);
+
+    /* 6. This step is handled by libCompose */
+
+    pthread_mutex_unlock(&ctx->hwc_mutex);
+    return 0;
+error:
+    pthread_mutex_unlock(&ctx->hwc_mutex);
+    return ret;
+}
+
+static int hwc_set(hwc_composer_device_1_t *dev,
+        size_t numDisplays, hwc_display_contents_1_t** displays)
+{
+    if (!numDisplays || !displays)
+        return 0;
+
+    struct hwcomposer_context* ctx = (struct hwcomposer_context*)dev;
+    hwc_display_contents_1_t *hwmem_contents = displays[HWC_DISPLAY_PRIMARY];
+    int hwmem_err = 0;
+
+    if (hwmem_contents)
+        hwmem_err = set_hwmem(ctx, hwmem_contents);
+
+    if (hwmem_err)
+        return hwmem_err;
+
+    return 0;
 }
 
 static int hwc_setPowerMode(struct hwc_composer_device_1 *dev, int disp,

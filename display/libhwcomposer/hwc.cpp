@@ -1804,7 +1804,7 @@ static int hwc_open(const struct hw_module_t *module, const char *name,
         pthread_mutex_lock(&dev->hwc_mutex);
 
 	dev->dev.common.tag = HARDWARE_DEVICE_TAG;
-	dev->dev.common.version = HWC_DEVICE_API_VERSION_1_0;
+	dev->dev.common.version = HWC_DEVICE_API_VERSION_1_3;
 	dev->dev.common.module = const_cast<hw_module_t*>(module);
 	dev->dev.common.close = hwc_device_close;
 

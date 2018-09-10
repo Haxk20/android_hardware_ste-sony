@@ -1797,7 +1797,7 @@ static void hwc_dump(struct hwc_composer_device_1* dev, char *buff, int buff_len
 }
 
 
-static int hwc_open(const struct hw_module_t *module, const char *name,
+int hwc_open(const struct hw_module_t *module, const char *name,
 		struct hw_device_t **device)
 {
 	struct hwcomposer_context *dev;

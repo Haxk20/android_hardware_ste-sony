@@ -79,10 +79,6 @@ static int hwcomposer_setparameter(struct hwc_composer_device_1 *dev,
                 int param, int value);
 static int hwcomposer_eventControl(struct hwc_composer_device_1* dev, int event, int dpy, int enabled);
 
-static struct hw_module_methods_t hwcomposer_module_methods = {
-    .open = hwcomposer_device_open,
-};
-
 
 static int hwcomposer_blank(struct hwc_composer_device_1 *dev,
         int disp, int blank)
@@ -155,19 +151,6 @@ static int hwcomposer_getDisplayConfigs(struct hwc_composer_device_1* dev, int d
     }
     return 0;
 }
-
-struct hwc_module HAL_MODULE_INFO_SYM = {
-    .common = {
-        .tag = HARDWARE_MODULE_TAG,
-        .module_api_version = HWC_MODULE_API_VERSION_0_1,
-        .hal_api_version = HARDWARE_HAL_API_VERSION,
-        .id = HWC_HARDWARE_MODULE_ID,
-        .name = "ST-Ericsson HWComposer module",
-        .author = "ST-Ericsson SA",
-        .methods = &hwcomposer_module_methods,
-   },
-};
-
 
 struct worker_context {
     pthread_mutex_t mutex;
@@ -1828,3 +1811,18 @@ error:
 }
 
 
+static struct hw_module_methods_t hwc_module_methods = {
+	.open = hwcomposer_device_open,
+};
+
+hwc_module_t HAL_MODULE_INFO_SYM = {
+	.common = {
+		.tag = HARDWARE_MODULE_TAG,
+		.version_major = 1,
+		.version_minor = 0,
+		.id = HWC_HARDWARE_MODULE_ID,
+		.name = "Dummy hwcomposer",
+		.author = "Simon Shields <simon@lineageos.org>",
+		.methods = &hwc_module_methods,
+	},
+};

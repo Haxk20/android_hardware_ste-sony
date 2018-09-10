@@ -1025,10 +1025,6 @@ static int hwcomposer_prepare(hwc_composer_device_1_t *dev, size_t numDisplays, 
             ctx->videoplayback = false;
             for (i = 0; i < list->numHwLayers; i++) {
                 struct hwc_layer_1* layer = &list->hwLayers[i];
-                if (layer->compositionType == HWC_FRAMEBUFFER_TARGET) {
-                    ALOGV("\tlayer %u: framebuffer target", i);
-                    continue;
-                }
 
                 if (layer->handle != NULL &&
                         bufferIsHWMEM(ctx->gralloc, layer->handle) &&
@@ -1765,7 +1761,7 @@ static int hwcomposer_device_open(const struct hw_module_t *module,
         pthread_mutex_lock(&ctx->hwc_mutex);
 
         ctx->dev.common.tag = HARDWARE_DEVICE_TAG;
-        ctx->dev.common.version = HWC_DEVICE_API_VERSION_1_1;
+        ctx->dev.common.version = HWC_DEVICE_API_VERSION_1_0;
         ctx->dev.common.module = (struct hw_module_t *)module;
         ctx->dev.common.close = hwcomposer_close;
 

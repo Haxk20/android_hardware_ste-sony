@@ -79,35 +79,52 @@ static int hwcomposer_setparameter(struct hwc_composer_device_1 *dev,
                 int param, int value);
 static int hwcomposer_eventControl(struct hwc_composer_device_1* dev, int event, int dpy, int enabled);
 
-
-static int hwcomposer_blank(struct hwc_composer_device_1 *dev,
-        int disp, int blank)
+static int hwcomposer_setPowerMode(struct hwc_composer_device_1 *dev, int dpy, int mode)
 {
-        return 0;
+/*    struct hwcomposer_context* ctx = ( struct hwcomposer_context*)dev;
+    int fence = 0;
+    int blank;
+
+    ALOGV("%s mode=%d", __FUNCTION__, mode);
+
+    fence = window_clear(ctx);
+    if (fence != -1)
+        close(fence);
+
+
+    switch (mode) {
+        case HWC_POWER_MODE_OFF:
+            blank = FB_BLANK_POWERDOWN;
+            break;
+        case HWC_POWER_MODE_NORMAL:
+            blank = FB_BLANK_UNBLANK;
+            break;
+        default:
+            // FIXME DOZE and DOZE_SUSPEND are unsupported by the fb driver
+            return -EINVAL;
+    }
+
+    if (ioctl(ctx->fb0_fd, FBIOBLANK, blank) < 0) {
+        ALOGE("%s Error %s in FBIOBLANK blank=%d", __FUNCTION__, strerror(errno), blank);
+    }
+*/
+	ALOGE("hwcomposer_setPowerMode: not implemented!");
+    return 0;
 }
 
-static int hwcomposer_getDisplayConfigs(struct hwc_composer_device_1* dev, int disp,
-            uint32_t* configs, size_t* numConfigs) {
-    int ret = 0;
-    struct hwcomposer_context *ctx = (struct hwcomposer_context *)dev;
-    // Currently we allow only 1 config, reported as config id # 0
-    // This config is passed in to getDisplayAttributes. Ignored for now.
-    switch(disp) {
-        case HWC_DISPLAY_PRIMARY:
-            if(*numConfigs > 0) {
-                configs[0] = 0;
-                *numConfigs = 1;
-            }
-            ret = 0; //NO_ERROR
-            break;
-        case HWC_DISPLAY_EXTERNAL:
-        case HWC_DISPLAY_VIRTUAL:
-            ret = -1; //Not connected
-            break;
-    }
-    return ret;
+static int hwcomposer_getActiveConfig(struct hwc_composer_device_1 *dev, int disp)
+{
+    // we only support the primary display
+    return 0;
 }
- static int hwcomposer_getDisplayAttributes(struct hwc_composer_device_1* dev, int disp,
+
+static int hwcomposer_setActiveConfig(struct hwc_composer_device_1 *dev, int dpy, int idx)
+{
+    // Only 1 config supported for the primary display
+    return (idx == 0) ? idx : -EINVAL;
+}
+
+static int hwcomposer_getDisplayAttributes(struct hwc_composer_device_1* dev, int disp,
             uint32_t config, const uint32_t* attributes, int32_t* values) {
     struct hwcomposer_context *ctx = (struct hwcomposer_context *)dev;
     //hwc_context_t* ctx = (hwc_context_t*)(dev);
@@ -150,6 +167,28 @@ static int hwcomposer_getDisplayConfigs(struct hwc_composer_device_1* dev, int d
         }
     }
     return 0;
+}
+
+static int hwcomposer_getDisplayConfigs(struct hwc_composer_device_1* dev, int disp,
+            uint32_t* configs, size_t* numConfigs) {
+    int ret = 0;
+    struct hwcomposer_context *ctx = (struct hwcomposer_context *)dev;
+    // Currently we allow only 1 config, reported as config id # 0
+    // This config is passed in to getDisplayAttributes. Ignored for now.
+    switch(disp) {
+        case HWC_DISPLAY_PRIMARY:
+            if(*numConfigs > 0) {
+                configs[0] = 0;
+                *numConfigs = 1;
+            }
+            ret = 0; //NO_ERROR
+            break;
+        case HWC_DISPLAY_EXTERNAL:
+        case HWC_DISPLAY_VIRTUAL:
+            ret = -1; //Not connected
+            break;
+    }
+    return ret;
 }
 
 struct worker_context {
@@ -1744,19 +1783,22 @@ static int hwcomposer_device_open(const struct hw_module_t *module,
         pthread_mutex_lock(&ctx->hwc_mutex);
 
         ctx->dev.common.tag = HARDWARE_DEVICE_TAG;
-        ctx->dev.common.version = HWC_DEVICE_API_VERSION_1_0;
+        ctx->dev.common.version = HWC_DEVICE_API_VERSION_1_4;
         ctx->dev.common.module = (struct hw_module_t *)module;
         ctx->dev.common.close = hwcomposer_close;
 
         ctx->dev.prepare       = hwcomposer_prepare;
         ctx->dev.set           = hwcomposer_set;
-        ctx->dev.dump          = hwcomposer_dump;
-        ctx->dev.registerProcs = hwcomposer_register_procs;
-        ctx->dev.query         = hwcomposer_query;
-        ctx->dev.blank         = hwcomposer_blank;
         ctx->dev.eventControl  = hwcomposer_eventControl;
+        ctx->dev.setPowerMode  = hwcomposer_setPowerMode;
+        ctx->dev.query         = hwcomposer_query;
+        ctx->dev.registerProcs = hwcomposer_register_procs;
+        ctx->dev.dump          = hwcomposer_dump;
         ctx->dev.getDisplayConfigs = hwcomposer_getDisplayConfigs;
         ctx->dev.getDisplayAttributes = hwcomposer_getDisplayAttributes;
+        ctx->dev.getActiveConfig = hwcomposer_getActiveConfig;
+        ctx->dev.setActiveConfig  = hwcomposer_setActiveConfig;
+
 
         ctx->hwmem = open(HWMEM_PATH, O_RDWR);
         if (ctx->hwmem < 0) {

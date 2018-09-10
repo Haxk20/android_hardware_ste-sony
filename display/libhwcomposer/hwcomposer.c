@@ -1025,10 +1025,10 @@ static int hwcomposer_prepare(hwc_composer_device_1_t *dev, size_t numDisplays, 
             ctx->videoplayback = false;
             for (i = 0; i < list->numHwLayers; i++) {
                 struct hwc_layer_1* layer = &list->hwLayers[i];
-                if (layer->compositionType == HWC_FRAMEBUFFER_TARGET) {
+                /*if (layer->compositionType == HWC_FRAMEBUFFER_TARGET) {
                     ALOGV("\tlayer %u: framebuffer target", i);
                     continue;
-                }
+                }*/
 
                 if (layer->handle != NULL &&
                         bufferIsHWMEM(ctx->gralloc, layer->handle) &&
